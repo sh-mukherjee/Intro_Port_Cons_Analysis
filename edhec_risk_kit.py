@@ -194,3 +194,75 @@ def sharpe_ratio(r, risk_free_rate, periods_per_year):
     ann_ex_ret = annualize_rets(excess_ret, periods_per_year)
     ann_vol = annualize_vol(r, periods_per_year)
     return ann_ex_ret/ann_vol
+
+def portfolio_return(weights, returns):
+    """
+    Takes a vector of asset weights, and a vector of asset returns, calculates the overall portfolio return
+    """
+    return weights.T @ returns
+
+def portfolio_vol(weights, covmat):
+    """
+    Takes a vector of asset weights, and a covariance matrix of the assets, calculates the overall portfolio std dev
+    """
+    return (weights.T @ covmat @ weights)**0.5
+
+def plot_ef2(n_points, er, cov, style = ".-"):
+    """
+    Plots the efficient frontier for a 2-asset portfolio, with the number of points, expected returns, covariance matrix and plot style as inputs
+    """
+    if er.shape[0] != 2 or er.shape[0] != 2:
+        raise ValueError("plot_ef2 can only plot 2-asset frontiers")
+    weights = [np.array([w,1-w]) for w in np.linspace(0,1,n_points)]
+    rets = [portfolio_return(w, er) for w in weights]
+    vols = [portfolio_vol(w, cov) for w in weights]
+    ef = pd.DataFrame(
+        {"Returns": rets, "Volatility": vols}
+        )
+    return ef.plot.line(x = "Volatility", y = "Returns", style = style)
+
+# we will use a quadratic optimizer that is built into scipy
+from scipy.optimize import minimize
+def minimize_vol(target_return, er, cov):
+    """
+    target return --> weights
+    """
+    n = er.shape[0] # number of assets is the same as the number of rows in the expected returns array
+    init_guess = np.repeat(1/n, n) #weights are inialized to be equal weights for all n assets
+    bounds = ((0.0, 1.0),)*n  # specifies the bounds as an n-tuple of the lower (0%) and upper (100%) bounds for the weights
+    return_is_target = {
+        'type': 'eq', # equality constraint
+        'args': (er,),
+        'fun': lambda weights, er: target_return - portfolio_return(weights, er) # lambda function that calculates on the fly if the portfolio return equals the target return
+    }
+    weights_sum_to_1 = {
+        'type': 'eq', # equality constraint
+        'fun': lambda weights: np.sum(weights) - 1
+    }
+    results = minimize(portfolio_vol, init_guess,
+                       args=(cov,), method="SLSQP", # quadratic programming optimizer
+                       options={'disp': False},  # set display to false to avoid results cluttering the screen
+                       constraints=(return_is_target, weights_sum_to_1), # set the constraints
+                       bounds=bounds
+                       )
+    return results.x #passes the results to a variable called x
+
+def optimal_weights(n_points, er, cov):
+    """
+    Generates a list of weights to run the optimizer on, to minimize the vol
+    """
+    target_rs = np.linspace(er.min(), er.max(), n_points) # takes a number of returns that lie inbetween the minimum and maximum expected returns
+    weights = [minimize_vol(target_return, er, cov) for target_return in target_rs]
+    return weights
+
+def plot_ef(n_points, er, cov, style = ".-"):
+    """
+    Plots the efficient frontier for a N-asset portfolio, with the number of points, expected returns, covariance matrix and plot style as inputs
+    """
+    weights = optimal_weights(n_points, er, cov)
+    rets = [portfolio_return(w, er) for w in weights]
+    vols = [portfolio_vol(w, cov) for w in weights]
+    ef = pd.DataFrame(
+        {"Returns": rets, "Volatility": vols}
+        )
+    return ef.plot.line(x = "Volatility", y = "Returns", style = style)
