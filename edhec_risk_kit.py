@@ -255,7 +255,44 @@ def optimal_weights(n_points, er, cov):
     weights = [minimize_vol(target_return, er, cov) for target_return in target_rs]
     return weights
 
-def plot_ef(n_points, er, cov, style = ".-"):
+def msr(risk_free_rate, er, cov):
+    """
+    Returns the weights of the portfolio that gives you the maximum Sharpe Ratio,
+    given the risk free rate, expected returns and covariance matrix
+    """
+    n = er.shape[0] # number of assets is the same as the number of rows in the expected returns array
+    init_guess = np.repeat(1/n, n) #weights are inialized to be equal weights for all n assets
+    bounds = ((0.0, 1.0),)*n  # specifies the bounds as an n-tuple of the lower (0%) and upper (100%) bounds for the weights
+    
+    weights_sum_to_1 = {
+        'type': 'eq', # equality constraint
+        'fun': lambda weights: np.sum(weights) - 1
+    }
+
+    def neg_sharpe_ratio(weights, risk_free_rate, er, cov):
+        """
+        Returns the negative of the Sharpe Ratio, given weights, exected returns and covariance matrix
+        """
+        r = portfolio_return(weights, er)
+        vol = portfolio_vol(weights, cov)
+        return -(r-risk_free_rate)/vol
+
+    results = minimize(neg_sharpe_ratio, init_guess, #minimize the negative of the Sharpe ratio
+                       args=(risk_free_rate, er, cov,), method="SLSQP", # quadratic programming optimizer
+                       options={'disp': False},  # set display to false to avoid results cluttering the screen
+                       constraints=(weights_sum_to_1), # set the constraints
+                       bounds=bounds
+                       )
+    return results.x #passes the results to a variable called x
+
+def gmv(cov):
+    """
+    Returns the weights of the global minimum variance portfolio, given the covariance matrix
+    """
+    n=cov.shape[0] # number of assets obtained by counting number of rows in the covariance matrix
+    return msr(0, np.repeat(1,n), cov) # dummy risk free rate of 0, dummy expected returns of 1 for each asset
+
+def plot_ef(n_points, er, cov, show_cml=False, style = ".-", risk_free_rate=0, show_ew=False, show_gmv=False):
     """
     Plots the efficient frontier for a N-asset portfolio, with the number of points, expected returns, covariance matrix and plot style as inputs
     """
@@ -263,6 +300,32 @@ def plot_ef(n_points, er, cov, style = ".-"):
     rets = [portfolio_return(w, er) for w in weights]
     vols = [portfolio_vol(w, cov) for w in weights]
     ef = pd.DataFrame(
-        {"Returns": rets, "Volatility": vols}
+        {"Returns": rets, 
+        "Volatility": vols}
         )
-    return ef.plot.line(x = "Volatility", y = "Returns", style = style)
+    ax = ef.plot.line(x = "Volatility", y = "Returns", style = style)
+    if show_ew:
+        n = er.shape[0]
+        w_ew = np.repeat(1/n, n)
+        r_ew = portfolio_return(w_ew, er)
+        vol_ew = portfolio_vol(w_ew, cov)
+        # display EW
+        ax.plot([vol_ew], [r_ew], color="goldenrod", marker="o", markersize=10)
+
+    if show_gmv:
+        w_gmv = gmv(cov) #GMV only depends on the covariance matrix, we do not need expected return assumptions
+        r_gmv = portfolio_return(w_gmv, er)
+        vol_gmv = portfolio_vol(w_gmv, cov)
+        # display GMV
+        ax.plot([vol_gmv], [r_gmv], color="midnightblue", marker="o", markersize=10)
+
+    if show_cml:
+        # Add the CML to the plot
+        ax.set_xlim(left=0)
+        w_msr = msr(risk_free_rate, er, cov) #weights of the max Sharpe ratio portfolio
+        r_msr = portfolio_return(w_msr, er) #return of the max Sharpe ratio portfolio
+        vol_msr = portfolio_vol(w_msr, cov) #vol of the max Sharpe ratio portfolio
+        cml_x = [0, vol_msr]
+        cml_y = [risk_free_rate, r_msr]
+        ax.plot(cml_x, cml_y, color = "green", marker="o", linestyle="dashed",markersize=12, linewidth=2)
+    return ax
